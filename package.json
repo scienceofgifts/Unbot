@@ -7,6 +7,8 @@
     "dev": "tsx server.ts",
     "build": "vite build",
     "start": "node server.ts",
+    "deploy": "vite build && wrangler deploy",
+    "cf-dev": "vite build && wrangler dev",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit"
@@ -32,6 +34,7 @@
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2",
-    "@types/express": "^4.17.21"
+    "@types/express": "^4.17.21",
+    "wrangler": "^4.10.0"
   }
 }
