@@ -1,0 +1,6 @@
+{
+  "name": "Unbot — AI Pattern & Cadence Editor",
+  "description": "A Hemingway Editor-style writing tool that detects and highlights AI writing patterns, clichés, and robotic sentence cadence in real time.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
