@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <rect width="64" height="64" rx="14" fill="#1C1917" />
+  <rect x="4" y="4" width="56" height="56" rx="11" stroke="#3F3A34" stroke-width="1.5" />
+  <!-- Editorial highlight bar behind the monogram -->
+  <rect x="13" y="38" width="38" height="10" rx="2" fill="#C93B37" fill-opacity="0.85" />
+  <!-- Serif U Monogram -->
+  <path
+    d="M17 16H27V19H24.5V35.5C24.5 41.2 27.6 44.5 32.5 44.5C37.4 44.5 40.2 41.2 40.2 35.2V19H37V16H46V19H43.5V35.5C43.5 43.6 39.2 48 32 48C24.8 48 20.2 43.8 20.2 35.8V19H17V16Z"
+    fill="#FBF9F5"
+  />
+</svg>
