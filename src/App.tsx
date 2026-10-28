@@ -31,11 +31,12 @@ export default function App() {
   // Gemini Deep Scan state
   const [deepScanMatches, setDeepScanMatches] = useState<IssueMatch[]>([]);
   const [customReplacementMap, setCustomReplacementMap] = useState<
-    Record<string, string[]>
+    Record<string, { replacements: string[]; modelUsed?: string }>
   >({});
   const [overallAssessment, setOverallAssessment] = useState<string | null>(
     null
   );
+  const [lastModelUsed, setLastModelUsed] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
@@ -52,10 +53,11 @@ export default function App() {
       const customByKey = customReplacementMap[m.text];
       const customById = customReplacementMap[m.id];
       const override = customById || customByKey;
-      if (override && override.length > 0) {
+      if (override && override.replacements.length > 0) {
         return {
           ...m,
-          replacements: override,
+          replacements: override.replacements,
+          modelUsed: override.modelUsed || m.modelUsed,
         };
       }
       return m;
@@ -96,12 +98,16 @@ export default function App() {
   }, []);
 
   const handleUpdateMatchReplacements = useCallback(
-    (matchId: string, newReplacements: string[]) => {
+    (matchId: string, newReplacements: string[], modelUsed?: string) => {
+      if (modelUsed) {
+        setLastModelUsed(modelUsed);
+      }
       const target = enrichedMatches.find((m) => m.id === matchId);
+      const entry = { replacements: newReplacements, modelUsed };
       setCustomReplacementMap((prev) => ({
         ...prev,
-        [matchId]: newReplacements,
-        ...(target ? { [target.text]: newReplacements } : {}),
+        [matchId]: entry,
+        ...(target ? { [target.text]: entry } : {}),
       }));
     },
     [enrichedMatches]
@@ -167,6 +173,10 @@ export default function App() {
     try {
       const result = await runDeepScan(text, analysis.matches);
 
+      if (result.modelUsed) {
+        setLastModelUsed(result.modelUsed);
+      }
+
       if (result.overallAssessment) {
         setOverallAssessment(result.overallAssessment);
       }
@@ -201,6 +211,7 @@ export default function App() {
           reason: issue.reason,
           replacements: issue.replacements || [],
           isDeepScan: true,
+          modelUsed: result.modelUsed,
         });
       });
 
@@ -212,10 +223,14 @@ export default function App() {
           const next = { ...prev };
           for (const cr of result.contextualRewrites) {
             if (cr.id && cr.replacements && cr.replacements.length > 0) {
-              next[cr.id] = cr.replacements;
+              const entry = {
+                replacements: cr.replacements,
+                modelUsed: result.modelUsed,
+              };
+              next[cr.id] = entry;
               const matchedObj = analysis.matches.find((m) => m.id === cr.id);
               if (matchedObj) {
-                next[matchedObj.text] = cr.replacements;
+                next[matchedObj.text] = entry;
               }
             }
           }
@@ -388,6 +403,7 @@ export default function App() {
           canUndo={history.length > 0}
           onUndo={handleUndo}
           overallAssessment={overallAssessment}
+          lastModelUsed={lastModelUsed}
         />
 
         <Sidebar

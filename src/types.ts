@@ -26,6 +26,7 @@ export interface IssueMatch {
   reason: string;
   replacements: string[];
   isDeepScan?: boolean;
+  modelUsed?: string;
 }
 
 export interface SentenceMetric {
@@ -59,6 +60,7 @@ export interface AnalysisResult {
 
 export interface DeepScanResponse {
   overallAssessment: string;
+  modelUsed?: string;
   semanticIssues: Array<{
     exactQuote: string;
     category: string;

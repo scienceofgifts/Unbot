@@ -36,7 +36,7 @@ export async function rewriteSingleSpan(params: {
   subcategory: string;
   reason: string;
   fullText: string;
-}): Promise<string[]> {
+}): Promise<{ replacements: string[]; modelUsed?: string }> {
   const response = await fetch("/api/rewrite-span", {
     method: "POST",
     headers: {
@@ -50,6 +50,12 @@ export async function rewriteSingleSpan(params: {
     throw new Error(errData.error || `Rewrite failed (${response.status})`);
   }
 
-  const data = (await response.json()) as { replacements?: string[] };
-  return data.replacements || [];
+  const data = (await response.json()) as {
+    replacements?: string[];
+    modelUsed?: string;
+  };
+  return {
+    replacements: data.replacements || [],
+    modelUsed: data.modelUsed,
+  };
 }

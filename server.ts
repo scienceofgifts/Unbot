@@ -2,7 +2,7 @@ import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 
 dotenv.config();
 
@@ -13,6 +13,18 @@ const app = express();
 const PORT = 3000;
 
 app.use(express.json({ limit: "2mb" }));
+
+const DEEP_SCAN_MODEL_CHAIN = [
+  "gemini-3.8-flash",
+  "gemini-3.6-flash",
+  "gemini-3.5-flash-lite",
+] as const;
+
+const REWRITE_SPAN_MODEL_CHAIN = [
+  "gemini-3.6-flash",
+  "gemini-3.5-flash-lite",
+  "gemini-3.8-flash",
+] as const;
 
 function getGenAIClient() {
   return new GoogleGenAI({
@@ -28,31 +40,49 @@ function getGenAIClient() {
 async function generateWithFallback(
   ai: GoogleGenAI,
   params: {
+    modelsToTry: readonly string[];
     contents: string;
     systemInstruction: string;
     responseSchema: Record<string, unknown>;
   }
-) {
-  const modelsToTry = ["gemini-2.5-flash", "gemini-3.8-flash"];
+): Promise<{ response: GenerateContentResponse; modelUsed: string }> {
   let lastError: unknown = null;
 
-  for (const modelName of modelsToTry) {
+  for (const modelName of params.modelsToTry) {
+    const abortSignal = AbortSignal.timeout(12000);
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
     try {
-      const response = await ai.models.generateContent({
+      const sdkPromise = ai.models.generateContent({
         model: modelName,
         contents: params.contents,
         config: {
           systemInstruction: params.systemInstruction,
           responseMimeType: "application/json",
           responseSchema: params.responseSchema,
-          temperature: 0.3,
+          abortSignal,
         },
       });
-      return response;
+
+      const timeoutPromise = new Promise<never>((_resolve, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error(`Model ${modelName} timed out after 12000ms`));
+        }, 12000);
+      });
+
+      const response = await Promise.race([sdkPromise, timeoutPromise]);
+      if (timeoutId) clearTimeout(timeoutId);
+      return { response, modelUsed: modelName };
     } catch (err) {
+      if (timeoutId) clearTimeout(timeoutId);
       lastError = err;
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[Unbot Fallback] Model "${modelName}" failed (${errMsg}). Trying next model in chain...`
+      );
     }
   }
+
   throw lastError;
 }
 
@@ -91,22 +121,45 @@ app.post("/api/deep-scan", async (req, res) => {
             .join("\n")
         : "None provided.";
 
-    const systemInstruction = `You are "Unbot", a ruthless, high-precision literary editor trained to detect subtle AI writing habits and rewrite robotic prose into sharp, concrete, human-sounding English.
+    const systemInstruction =
+      `You are "Unbot", a ruthless, high-precision literary editor trained to detect subtle AI writing habits and rewrite robotic prose into sharp, concrete, human-sounding English.
 
 Your job has two parts:
-PART 1 — SEMANTIC AI PATTERNS (` + "`semanticIssues`" + `):
+PART 1 — SEMANTIC AI PATTERNS (` +
+      "`semanticIssues`" +
+      `):
 Scan the user's text for subtle AI patterns that regular expressions miss:
-1. "Hermetically Sealed Paragraph" (category: "red"): Paragraphs or closing sentences of a paragraph that end with a self-contained mini-conclusion restating the paragraph's own topic sentence or moralizing instead of pulling the reader forward. CRITICAL: Extract the exact verbatim closing sentence (or clause) from the text as ` + "`exactQuote`" + `.
-2. "Vague Authority Plural" (category: "yellow"): Phrases like "many companies", "studies show", "experts agree", "industry leaders", "researchers have found", "modern organizations" that hide behind anonymous plural authority instead of naming a specific source, number, or concrete subject. CRITICAL: Extract the exact verbatim phrase or clause from the text as ` + "`exactQuote`" + `.
-3. "Robotic Symmetry / Contrast" (category: "orange"): Subtle AI structural padding, tricolon clichés, or overly symmetrical corporate phrasing not caught by simple rules. Extract the exact verbatim phrase/sentence from the text as ` + "`exactQuote`" + `.
+1. "Hermetically Sealed Paragraph" (category: "red"): Paragraphs or closing sentences of a paragraph that end with a self-contained mini-conclusion restating the paragraph's own topic sentence or moralizing instead of pulling the reader forward. CRITICAL: Extract the exact verbatim closing sentence (or clause) from the text as ` +
+      "`exactQuote`" +
+      `.
+2. "Vague Authority Plural" (category: "yellow"): Phrases like "many companies", "studies show", "experts agree", "industry leaders", "researchers have found", "modern organizations" that hide behind anonymous plural authority instead of naming a specific source, number, or concrete subject. CRITICAL: Extract the exact verbatim phrase or clause from the text as ` +
+      "`exactQuote`" +
+      `.
+3. "Robotic Symmetry / Contrast" (category: "orange"): Subtle AI structural padding, tricolon clichés, or overly symmetrical corporate phrasing not caught by simple rules. Extract the exact verbatim phrase/sentence from the text as ` +
+      "`exactQuote`" +
+      `.
 
-For every item in ` + "`semanticIssues`" + `:
-- ` + "`exactQuote`" + ` MUST be an exact, character-for-character substring present in the user's text so the editor can highlight and replace it in-place.
-- Provide ` + "`reason`" + ` explaining concisely why this specific line sounds like an LLM.
-- Provide ` + "`replacements`" + `: exactly 2 sharp, concrete, human-sounding rewrites that can directly replace ` + "`exactQuote`" + ` in-place.
+For every item in ` +
+      "`semanticIssues`" +
+      `:
+- ` +
+      "`exactQuote`" +
+      ` MUST be an exact, character-for-character substring present in the user's text so the editor can highlight and replace it in-place.
+- Provide ` +
+      "`reason`" +
+      ` explaining concisely why this specific line sounds like an LLM.
+- Provide ` +
+      "`replacements`" +
+      `: exactly 2 sharp, concrete, human-sounding rewrites that can directly replace ` +
+      "`exactQuote`" +
+      ` in-place.
 
-PART 2 — CONTEXTUAL REWRITES FOR EXISTING FLAGS (` + "`contextualRewrites`" + `):
-For the provided list of existing client-side flagged spans, generate 2 sharp, context-aware human replacements that fit smoothly into the surrounding sentence when ` + "`exactQuote`" + ` is replaced in-place.`;
+PART 2 — CONTEXTUAL REWRITES FOR EXISTING FLAGS (` +
+      "`contextualRewrites`" +
+      `):
+For the provided list of existing client-side flagged spans, generate 2 sharp, context-aware human replacements that fit smoothly into the surrounding sentence when ` +
+      "`exactQuote`" +
+      ` is replaced in-place.`;
 
     const prompt = `USER MANUSCRIPT:
 """
@@ -190,7 +243,8 @@ Return JSON matching the schema.`;
       required: ["overallAssessment", "semanticIssues", "contextualRewrites"],
     };
 
-    const response = await generateWithFallback(ai, {
+    const { response, modelUsed } = await generateWithFallback(ai, {
+      modelsToTry: DEEP_SCAN_MODEL_CHAIN,
       contents: prompt,
       systemInstruction,
       responseSchema,
@@ -198,7 +252,10 @@ Return JSON matching the schema.`;
 
     const rawText = response.text || "{}";
     const parsed = JSON.parse(rawText);
-    res.json(parsed);
+    res.json({
+      ...parsed,
+      modelUsed,
+    });
   } catch (error: unknown) {
     console.error("Deep scan error:", error);
     const message =
@@ -258,7 +315,8 @@ Provide 2 direct drop-in replacements for "${matchedText}".`;
       required: ["replacements"],
     };
 
-    const response = await generateWithFallback(ai, {
+    const { response, modelUsed } = await generateWithFallback(ai, {
+      modelsToTry: REWRITE_SPAN_MODEL_CHAIN,
       contents: prompt,
       systemInstruction,
       responseSchema,
@@ -266,7 +324,10 @@ Provide 2 direct drop-in replacements for "${matchedText}".`;
 
     const rawText = response.text || "{}";
     const parsed = JSON.parse(rawText);
-    res.json(parsed);
+    res.json({
+      ...parsed,
+      modelUsed,
+    });
   } catch (error: unknown) {
     console.error("Single span rewrite error:", error);
     const message =
